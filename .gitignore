@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+venv/
+
+# Generated output — keep the code, not the artifacts
+cio_digital_flighting.pptx
+slide_preview.pdf
+slide_preview.pdf.png
+*.pptx
+flights.json
