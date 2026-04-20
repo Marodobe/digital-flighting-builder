@@ -28,7 +28,7 @@ COLOR_OPTIONS = {
     "tan":    ("Gold/Tan",     "#C0A060"),
 }
 
-CHANNELS = [
+DEFAULT_CHANNELS = [
     "LinkedIn Static",
     "LinkedIn Video",
     "LinkedIn Carousel",
@@ -44,6 +44,8 @@ CHANNELS = [
 def _init():
     if "flights" not in st.session_state:
         st.session_state.flights = []
+    if "channels" not in st.session_state:
+        st.session_state.channels = list(DEFAULT_CHANNELS)
     if "counter" not in st.session_state:
         st.session_state.counter = 1
     if "pptx_bytes" not in st.session_state:
@@ -100,10 +102,10 @@ def assign_rows(flights, week_dates):
             result.append((fl, ri))
     return result, len(rows)
 
-def build_channel_cells(flights, week_dates):
+def build_channel_cells(flights, week_dates, channels):
     """For each channel, return a list of badge-ID lists (one per week column)."""
     out = {}
-    for ch in CHANNELS:
+    for ch in channels:
         cells = []
         for i, ws in enumerate(week_dates):
             we = ws + timedelta(days=6)
@@ -194,28 +196,30 @@ def _vline(slide, x, y, height, col="CCCAC4", lw=0.3):
 
 
 def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
-                  slide_title: str, subtitle: str) -> bytes:
+                  slide_title: str, subtitle: str, channels: list) -> bytes:
     n_wk = len(week_dates)
     col_w = (SL_W - ML - MR - LABEL_W) / n_wk
     col_x0 = ML + LABEL_W
 
     flight_rows, n_gr = assign_rows(flights, week_dates)
     n_gr = max(n_gr, 1)
-    channel_cells = build_channel_cells(flights, week_dates)
+    channel_cells = build_channel_cells(flights, week_dates, channels)
 
-    # Vertical layout
+    # Vertical layout — adaptive so adding many channels still fits
     T_Y, T_H       = 0.10, 0.40
     HDR_Y, HDR_H   = 0.54, 0.26
     G_Y             = HDR_Y + HDR_H
     G_RH            = max(0.15, min(0.22, 2.8 / n_gr))
     G_BOT           = G_Y + n_gr * G_RH
     CH_Y            = G_BOT + 0.07
-    C_RH            = 0.295
-    N_CH            = len(CHANNELS)
+    FT_Y            = SL_H - 0.26
+    LG_H            = 0.70
+    # Reserve space for legend + footer; fit channel rows in what's left
+    avail_for_chan  = FT_Y - LG_H - 0.06 - CH_Y
+    N_CH            = max(len(channels), 1)
+    C_RH            = max(0.20, min(0.34, avail_for_chan / N_CH))
     CH_BOT          = CH_Y + N_CH * C_RH
     LG_Y            = CH_BOT + 0.06
-    LG_H            = 0.70
-    FT_Y            = SL_H - 0.26
 
     prs = Presentation()
     prs.slide_width = Inches(SL_W)
@@ -291,7 +295,7 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
     BADGE_GAP = 0.010
     MAX_ROW   = max(1, int((col_w - 0.015) / (BADGE_BW + BADGE_GAP)))
 
-    for ri, ch in enumerate(CHANNELS):
+    for ri, ch in enumerate(channels):
         ry  = CH_Y + ri * C_RH
         alt = ri % 2 == 1
         _box(slide, ML, ry, SL_W - ML - MR, C_RH,
@@ -417,6 +421,41 @@ with st.sidebar:
     )
 
     st.divider()
+    with st.expander("📡 Manage Channels", expanded=False):
+        st.caption("Channels appear as rows on the slide and as options when adding a flight.")
+
+        # Current channels with delete buttons
+        for i, ch in enumerate(st.session_state.channels):
+            ccol1, ccol2 = st.columns([5, 1])
+            ccol1.write(f"• {ch}")
+            if ccol2.button("✕", key=f"del_ch_{i}", help=f"Remove '{ch}'"):
+                # Strip from any flights that reference it
+                for f in st.session_state.flights:
+                    f["channels"] = [c for c in f["channels"] if c != ch]
+                st.session_state.channels.pop(i)
+                st.session_state.pptx_bytes = None
+                st.rerun()
+
+        with st.form("add_channel_form", clear_on_submit=True):
+            new_ch = st.text_input(
+                "New channel name",
+                placeholder="e.g. Reddit Promoted Post",
+                label_visibility="collapsed",
+            )
+            add_ch = st.form_submit_button("＋ Add channel", use_container_width=True)
+        if add_ch:
+            name = new_ch.strip()
+            if not name:
+                st.warning("Enter a channel name.")
+            elif name in st.session_state.channels:
+                st.warning(f"'{name}' already exists.")
+            else:
+                st.session_state.channels.append(name)
+                st.session_state.pptx_bytes = None
+                st.success(f"Added '{name}'.")
+                st.rerun()
+
+    st.divider()
     st.markdown("## ✈️ Add New Flight")
 
     with st.form("add_flight_form", clear_on_submit=True):
@@ -438,8 +477,8 @@ with st.sidebar:
 
         channels = st.multiselect(
             "Channels",
-            options=CHANNELS,
-            default=["LinkedIn Static"],
+            options=st.session_state.channels,
+            default=[st.session_state.channels[0]] if st.session_state.channels else [],
         )
 
         submitted = st.form_submit_button("＋ Add Flight", use_container_width=True, type="primary")
@@ -467,9 +506,14 @@ with st.sidebar:
     st.markdown("## 💾 Import / Export")
 
     export_data = json.dumps(
-        [{**f, "start_date": str(f["start_date"]), "end_date": str(f["end_date"])}
-         for f in st.session_state.flights],
-        indent=2
+        {
+            "channels": st.session_state.channels,
+            "flights": [
+                {**f, "start_date": str(f["start_date"]), "end_date": str(f["end_date"])}
+                for f in st.session_state.flights
+            ],
+        },
+        indent=2,
     )
     st.download_button(
         "Export flights as JSON",
@@ -482,13 +526,22 @@ with st.sidebar:
     uploaded = st.file_uploader("Import flights from JSON", type="json", label_visibility="collapsed")
     if uploaded:
         try:
-            imported = json.loads(uploaded.read())
-            for f in imported:
+            raw = json.loads(uploaded.read())
+            # Back-compat: old exports were a bare list of flights
+            if isinstance(raw, list):
+                imported_flights = raw
+                imported_channels = None
+            else:
+                imported_flights = raw.get("flights", [])
+                imported_channels = raw.get("channels")
+            for f in imported_flights:
                 f["start_date"] = date.fromisoformat(f["start_date"])
                 f["end_date"]   = date.fromisoformat(f["end_date"])
-            st.session_state.flights = imported
+            st.session_state.flights = imported_flights
+            if imported_channels:
+                st.session_state.channels = imported_channels
             st.session_state.pptx_bytes = None
-            st.success(f"Imported {len(imported)} flights.")
+            st.success(f"Imported {len(imported_flights)} flights.")
             st.rerun()
         except Exception as e:
             st.error(f"Import failed: {e}")
@@ -578,6 +631,7 @@ with tab_generate:
                         current_week_idx=cur_idx,
                         slide_title=slide_title,
                         subtitle=subtitle,
+                        channels=st.session_state.channels,
                     )
                     st.success("Slide ready!")
                 except Exception as e:
