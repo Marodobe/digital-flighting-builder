@@ -118,6 +118,147 @@ def build_channel_cells(flights, week_dates, channels):
         out[ch] = cells
     return out
 
+# ─── HTML preview ────────────────────────────────────────────────────────────
+
+def build_preview_html(flights, week_dates, current_week_idx,
+                       slide_title, subtitle, channels):
+    """Render an HTML preview of the slide that mirrors the PPTX layout."""
+    n_wk = len(week_dates)
+    flight_rows, n_gr = assign_rows(flights, week_dates)
+    n_gr = max(n_gr, 1)
+    channel_cells = build_channel_cells(flights, week_dates, channels)
+    flights_by_id = {f["id"]: f for f in flights}
+
+    css = f"""
+    <style>
+    .sp {{ font-family: -apple-system, "Segoe UI", Calibri, sans-serif;
+           background: white; border: 1px solid #d0cdc6; padding: 14px 16px;
+           color: #1a1a2e; max-width: 100%; box-sizing: border-box; }}
+    .sp .ttl {{ font-size: 22px; font-weight: 700; line-height: 1.1; }}
+    .sp .sub {{ font-size: 12px; color: #6b6560; margin: 2px 0 10px; }}
+    .sp .grid {{ display: grid; grid-template-columns: 120px repeat({n_wk}, 1fr);
+                 gap: 0; font-size: 9px; }}
+    .sp .c {{ border: 0.5px solid #d8d4cd; padding: 2px 4px; box-sizing: border-box;
+              min-height: 22px; display: flex; align-items: center;
+              overflow: hidden; }}
+    .sp .lab {{ background: #eeeae4; font-weight: 600; font-size: 9.5px;
+                line-height: 1.15; }}
+    .sp .hdr {{ background: #eeeae4; justify-content: center; font-weight: 600;
+                font-size: 8.5px; }}
+    .sp .hdr.cur {{ background: #1a1a2e; color: white; }}
+    .sp .bar {{ color: white; font-weight: 500; font-size: 9px;
+                gap: 6px; padding: 2px 6px; white-space: nowrap;
+                text-overflow: ellipsis; min-height: 22px; border: none;
+                border-right: 1px solid rgba(255,255,255,0.6); }}
+    .sp .bar .fid {{ font-weight: 700; padding-right: 6px; flex: 0 0 auto;
+                     border-right: 1px solid rgba(255,255,255,0.45); }}
+    .sp .bar .lbl {{ overflow: hidden; text-overflow: ellipsis; }}
+    .sp .ch {{ padding: 3px; align-content: flex-start; flex-wrap: wrap;
+               gap: 2px; min-height: 26px; }}
+    .sp .ch.cur {{ background: #ece9f4; }}
+    .sp .chb {{ display: inline-block; padding: 1px 3px; font-size: 7.5px;
+                font-weight: 700; color: white; border-radius: 2px;
+                line-height: 1.3; }}
+    .sp .ch-name {{ font-weight: 600; font-size: 9.5px; line-height: 1.15;
+                    white-space: pre-line; }}
+    .sp .leg {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+                gap: 4px 14px; margin-top: 12px; padding: 8px 10px;
+                background: #f7f5f2; border: 1px solid #d8d4cd; font-size: 10px; }}
+    .sp .leg-ttl {{ grid-column: 1 / -1; font-size: 9px; font-weight: 700;
+                    letter-spacing: 0.5px; color: #6b6560; }}
+    .sp .leg-item {{ display: flex; align-items: center; gap: 6px; }}
+    .sp .leg-sw {{ width: 14px; height: 12px; flex: 0 0 14px; }}
+    .sp .leg-id {{ font-weight: 700; }}
+    .sp .empty {{ color: #9a948b; font-style: italic; padding: 12px;
+                  text-align: center; }}
+    </style>
+    """
+
+    h = [css, '<div class="sp">']
+    h.append(f'<div class="ttl">{slide_title}</div>')
+    h.append(f'<div class="sub">{subtitle}</div>')
+
+    if not flights:
+        h.append('<div class="empty">No flights yet. Add one in the sidebar to see the preview.</div>')
+        h.append('</div>')
+        return "".join(h)
+
+    h.append('<div class="grid">')
+
+    # ── Header row ───────────────────────────────────────────────────────
+    h.append('<div class="c lab">Content Flights</div>')
+    for i, d in enumerate(week_dates):
+        cls = "c hdr cur" if i == current_week_idx else "c hdr"
+        h.append(f'<div class="{cls}">{week_label(d)}</div>')
+
+    # ── Gantt rows ───────────────────────────────────────────────────────
+    by_row = {}
+    for f, gr in flight_rows:
+        s, e = flight_cols(f, week_dates)
+        if s is None:
+            continue
+        by_row.setdefault(gr, []).append((f, s, e))
+    for gr in range(n_gr):
+        h.append('<div class="c lab"></div>')
+        bars = sorted(by_row.get(gr, []), key=lambda x: x[1])
+        cur_col = 0
+        for f, s, e in bars:
+            while cur_col < s:
+                h.append('<div class="c"></div>')
+                cur_col += 1
+            span = max(1, e - s)
+            color = COLOR_OPTIONS[f["color"]][1]
+            esc_label = (f["label"] or "").replace("<", "&lt;").replace(">", "&gt;")
+            h.append(
+                f'<div class="c bar" style="background:{color};'
+                f' grid-column: span {span}">'
+                f'<span class="fid">{f["id"]}</span>'
+                f'<span class="lbl">{esc_label}</span>'
+                f'</div>'
+            )
+            cur_col = e
+        while cur_col < n_wk:
+            h.append('<div class="c"></div>')
+            cur_col += 1
+
+    # ── Channel rows ─────────────────────────────────────────────────────
+    for ch in channels:
+        h.append(f'<div class="c lab"><span class="ch-name">{ch}</span></div>')
+        cells = channel_cells.get(ch, [])
+        for wk in range(n_wk):
+            badges_html = ""
+            if wk < len(cells):
+                for fid in cells[wk]:
+                    f = flights_by_id.get(fid)
+                    color = COLOR_OPTIONS[f["color"]][1] if f else "#888"
+                    badges_html += f'<span class="chb" style="background:{color}">{fid}</span>'
+            cls = "c ch cur" if wk == current_week_idx else "c ch"
+            h.append(f'<div class="{cls}">{badges_html}</div>')
+
+    h.append('</div>')  # /grid
+
+    # ── Legend ───────────────────────────────────────────────────────────
+    h.append('<div class="leg">')
+    h.append('<div class="leg-ttl">FLIGHT LEGEND</div>')
+    seen = set()
+    for f in flights:
+        if f["id"] in seen:
+            continue
+        seen.add(f["id"])
+        color = COLOR_OPTIONS[f["color"]][1]
+        esc_label = (f["label"] or "").replace("<", "&lt;").replace(">", "&gt;")
+        h.append(
+            f'<div class="leg-item">'
+            f'<span class="leg-sw" style="background:{color}"></span>'
+            f'<span><span class="leg-id">{f["id"]}</span> {esc_label}</span>'
+            f'</div>'
+        )
+    h.append('</div>')
+
+    h.append('</div>')  # /sp
+    return "".join(h)
+
+
 # ─── PPTX generation ────────────────────────────────────────────────────────
 
 def _c(h):
@@ -552,7 +693,9 @@ with st.sidebar:
 st.markdown("# 📊 Digital Flighting Builder")
 st.caption("Build content flight plans and export a polished PowerPoint slide.")
 
-tab_flights, tab_generate = st.tabs(["✈️  Manage Flights", "📥  Generate Slide"])
+tab_flights, tab_preview, tab_generate = st.tabs(
+    ["✈️  Manage Flights", "👁  Preview", "📥  Generate Slide"]
+)
 
 # ── Tab 1: Manage Flights ────────────────────────────────────────────────────
 with tab_flights:
@@ -562,14 +705,78 @@ with tab_flights:
         st.markdown(f"**{len(st.session_state.flights)} flight(s)**")
 
         # Column headers
-        hcols = st.columns([0.7, 2.8, 1.0, 1.1, 1.1, 2.5, 0.5])
-        for col, header in zip(hcols, ["ID", "Label", "Color", "Start", "End", "Channels", ""]):
+        col_ratios = [0.6, 2.5, 1.0, 1.0, 1.0, 2.3, 0.4, 0.4]
+        hcols = st.columns(col_ratios)
+        for col, header in zip(hcols, ["ID", "Label", "Color", "Start", "End", "Channels", "", ""]):
             col.markdown(f"<div class='section-hdr'>{header}</div>", unsafe_allow_html=True)
 
         st.divider()
 
+        color_keys = list(COLOR_OPTIONS.keys())
+
         for i, fl in enumerate(st.session_state.flights):
-            cols = st.columns([0.7, 2.8, 1.0, 1.1, 1.1, 2.5, 0.5])
+            # ── EDIT MODE ────────────────────────────────────────────────
+            if st.session_state.edit_idx == i:
+                with st.container(border=True):
+                    st.markdown(f"##### ✏️ Editing **{fl['id']}**")
+
+                    e_label = st.text_input(
+                        "Label / Offer name",
+                        value=fl["label"],
+                        key=f"e_label_{i}",
+                    )
+
+                    ec1, ec2, ec3 = st.columns([2, 1, 1])
+                    e_color = ec1.selectbox(
+                        "Color",
+                        options=color_keys,
+                        index=color_keys.index(fl["color"]) if fl["color"] in color_keys else 0,
+                        format_func=lambda k: COLOR_OPTIONS[k][0],
+                        key=f"e_color_{i}",
+                    )
+                    e_start = ec2.date_input(
+                        "Start date",
+                        value=fl["start_date"],
+                        key=f"e_start_{i}",
+                    )
+                    e_end = ec3.date_input(
+                        "End date",
+                        value=fl["end_date"],
+                        key=f"e_end_{i}",
+                    )
+
+                    e_chans = st.multiselect(
+                        "Channels",
+                        options=st.session_state.channels,
+                        default=[c for c in fl["channels"] if c in st.session_state.channels],
+                        key=f"e_chan_{i}",
+                    )
+
+                    bsave, bcancel, _ = st.columns([1, 1, 4])
+                    if bsave.button("💾  Save", key=f"save_{i}", type="primary", use_container_width=True):
+                        if e_end < e_start:
+                            st.error("End date must be on or after start date.")
+                        elif not (e_label or "").strip():
+                            st.error("Label can't be empty.")
+                        else:
+                            st.session_state.flights[i] = {
+                                **fl,
+                                "label": e_label.strip(),
+                                "color": e_color,
+                                "start_date": e_start,
+                                "end_date": e_end,
+                                "channels": e_chans,
+                            }
+                            st.session_state.edit_idx = None
+                            st.session_state.pptx_bytes = None
+                            st.rerun()
+                    if bcancel.button("Cancel", key=f"cancel_{i}", use_container_width=True):
+                        st.session_state.edit_idx = None
+                        st.rerun()
+                continue
+
+            # ── DISPLAY MODE ─────────────────────────────────────────────
+            cols = st.columns(col_ratios)
             hex_color = COLOR_OPTIONS[fl["color"]][1].lstrip("#")
             badge_html = f"<span class='badge' style='background:#{hex_color}'>{fl['id']}</span>"
 
@@ -588,8 +795,13 @@ with tab_flights:
                 for ch in fl["channels"]
             )
             cols[5].markdown(channel_badges or "—", unsafe_allow_html=True)
-            if cols[6].button("✕", key=f"del_{i}", help="Delete this flight"):
+            if cols[6].button("✏", key=f"edit_{i}", help="Edit this flight"):
+                st.session_state.edit_idx = i
+                st.rerun()
+            if cols[7].button("✕", key=f"del_{i}", help="Delete this flight"):
                 st.session_state.flights.pop(i)
+                if st.session_state.edit_idx == i:
+                    st.session_state.edit_idx = None
                 st.session_state.pptx_bytes = None
                 st.rerun()
 
@@ -600,7 +812,24 @@ with tab_flights:
             st.rerun()
 
 
-# ── Tab 2: Generate Slide ────────────────────────────────────────────────────
+# ── Tab 2: Preview ───────────────────────────────────────────────────────────
+with tab_preview:
+    st.caption("Live preview — updates as you add or edit flights.")
+    preview_html = build_preview_html(
+        flights=st.session_state.flights,
+        week_dates=week_dates,
+        current_week_idx=cur_idx,
+        slide_title=slide_title,
+        subtitle=subtitle,
+        channels=st.session_state.channels,
+    )
+    # Approximate height based on rows
+    n_gr_preview = max(assign_rows(st.session_state.flights, week_dates)[1], 1)
+    est_height = 110 + 30 + 24 * n_gr_preview + 32 * len(st.session_state.channels) + 140
+    st.components.v1.html(preview_html, height=est_height, scrolling=True)
+
+
+# ── Tab 3: Generate Slide ────────────────────────────────────────────────────
 with tab_generate:
     if not st.session_state.flights:
         st.warning("Add at least one flight before generating.")
