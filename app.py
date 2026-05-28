@@ -46,12 +46,25 @@ def _init():
         st.session_state.flights = []
     if "channels" not in st.session_state:
         st.session_state.channels = list(DEFAULT_CHANNELS)
-    if "counter" not in st.session_state:
-        st.session_state.counter = 1
     if "pptx_bytes" not in st.session_state:
         st.session_state.pptx_bytes = None
     if "edit_idx" not in st.session_state:
         st.session_state.edit_idx = None
+
+
+def next_flight_id() -> str:
+    """Return the smallest unused F-ID (e.g. 'F1', 'F2') based on current flights."""
+    used = set()
+    for f in st.session_state.flights:
+        if isinstance(f.get("id"), str) and f["id"].startswith("F"):
+            try:
+                used.add(int(f["id"][1:]))
+            except ValueError:
+                pass
+    n = 1
+    while n in used:
+        n += 1
+    return f"F{n}"
 
 _init()
 
@@ -544,7 +557,22 @@ with st.sidebar:
     slide_title = st.text_input("Slide title", value="CIO Digital Flighting")
     subtitle    = st.text_input("Subtitle", value="Hero Content")
 
-    start_date = st.date_input("Week range start", value=date(2024, 3, 4))
+    # Default the slide's week-range start to the Monday of the current week
+    _today = date.today()
+    _default_range_start = _today - timedelta(days=_today.weekday())
+
+    def _sync_form_dates():
+        """When the slide's week range start changes, update the Add-Flight defaults too."""
+        new_start = st.session_state.range_start
+        st.session_state.f_start = new_start
+        st.session_state.f_end   = new_start + timedelta(weeks=4)
+
+    start_date = st.date_input(
+        "Week range start",
+        value=_default_range_start,
+        key="range_start",
+        on_change=_sync_form_dates,
+    )
     n_weeks    = st.slider("Number of weeks", min_value=6, max_value=26, value=14)
 
     week_dates = build_week_dates(start_date, n_weeks)
@@ -599,9 +627,11 @@ with st.sidebar:
     st.divider()
     st.markdown("## ✈️ Add New Flight")
 
+    auto_id = next_flight_id()
     with st.form("add_flight_form", clear_on_submit=True):
-        auto_id = f"F{st.session_state.counter}"
-        flight_id  = st.text_input("Flight ID", value=auto_id)
+        # Dynamic key — when auto_id changes (e.g. after a delete), the widget
+        # resets to the new default instead of clinging to the previous value.
+        flight_id  = st.text_input("Flight ID", value=auto_id, key=f"f_id_{auto_id}")
         flight_lbl = st.text_input("Offer / Content label *", placeholder="e.g. 3/5 AIDT Core")
 
         color_key = st.selectbox(
@@ -638,7 +668,6 @@ with st.sidebar:
                 "end_date":   f_end,
                 "channels":   channels,
             })
-            st.session_state.counter += 1
             st.session_state.pptx_bytes = None  # invalidate
             st.success(f"Added {flight_id}!")
             st.rerun()
