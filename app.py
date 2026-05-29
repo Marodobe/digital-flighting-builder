@@ -727,7 +727,7 @@ with st.sidebar:
         key="range_start",
         on_change=_sync_form_dates,
     )
-    n_weeks    = st.slider("Number of weeks", min_value=6, max_value=26, key="n_weeks")
+    n_weeks    = st.slider("Number of weeks", min_value=1, max_value=26, key="n_weeks")
 
     week_dates = build_week_dates(start_date, n_weeks)
     today = date.today()
@@ -736,12 +736,15 @@ with st.sidebar:
          if ws <= today <= ws + timedelta(days=6)),
         0
     )
-    cur_idx = st.slider(
-        "Current week column",
-        min_value=0, max_value=n_weeks - 1, value=cur_idx,
-        format=f"Week %d",
-        help="Which column is highlighted as 'current week'",
-    )
+    if n_weeks > 1:
+        cur_idx = st.slider(
+            "Current week column",
+            min_value=0, max_value=n_weeks - 1, value=cur_idx,
+            format="Week %d",
+            help="Which column is highlighted as 'current week'",
+        )
+    else:
+        cur_idx = 0  # Only one week — nothing to choose
 
     st.divider()
     with st.expander("🎨 Creative Groups (legend labels)", expanded=False):
@@ -851,6 +854,10 @@ with st.sidebar:
                 "end_date":   f_end,
                 "channels":   channels,
             })
+            # Keep date selections sticky across consecutive adds — flights
+            # often repeat the same date window, so reusing it saves clicks.
+            st.session_state.f_start = f_start
+            st.session_state.f_end   = f_end
             st.session_state.pptx_bytes = None  # invalidate
             st.success(f"Added {flight_id}!")
             st.rerun()
