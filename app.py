@@ -814,16 +814,22 @@ with st.sidebar:
     st.markdown("## ✈️ Add New Flight")
 
     auto_id = next_flight_id()
-    with st.form("add_flight_form", clear_on_submit=True):
-        # Dynamic key — when auto_id changes (e.g. after a delete), the widget
-        # resets to the new default instead of clinging to the previous value.
+    # Dynamic keys tied to auto_id make the label & channels fields reset
+    # automatically after each successful add (since auto_id increments).
+    # Dates and color do NOT use dynamic keys, so they stay sticky.
+    with st.form("add_flight_form", clear_on_submit=False):
         flight_id  = st.text_input("Flight ID", value=auto_id, key=f"f_id_{auto_id}")
-        flight_lbl = st.text_input("Offer / Content label *", placeholder="e.g. 3/5 AIDT Core")
+        flight_lbl = st.text_input(
+            "Offer / Content label *",
+            placeholder="e.g. 3/5 AIDT Core",
+            key=f"f_label_{auto_id}",
+        )
 
         color_key = st.selectbox(
             "Color",
             options=list(COLOR_OPTIONS.keys()),
             format_func=lambda k: COLOR_OPTIONS[k][0],
+            key="f_color",
         )
 
         col1, col2 = st.columns(2)
@@ -836,6 +842,7 @@ with st.sidebar:
             "Channels",
             options=st.session_state.channels,
             default=[st.session_state.channels[0]] if st.session_state.channels else [],
+            key=f"f_chans_{auto_id}",
         )
 
         submitted = st.form_submit_button("＋ Add Flight", use_container_width=True, type="primary")
@@ -854,10 +861,6 @@ with st.sidebar:
                 "end_date":   f_end,
                 "channels":   channels,
             })
-            # Keep date selections sticky across consecutive adds — flights
-            # often repeat the same date window, so reusing it saves clicks.
-            st.session_state.f_start = f_start
-            st.session_state.f_end   = f_end
             st.session_state.pptx_bytes = None  # invalidate
             st.success(f"Added {flight_id}!")
             st.rerun()
