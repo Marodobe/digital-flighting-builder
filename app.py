@@ -7,6 +7,7 @@ Deploy to share: push to GitHub, connect to share.streamlit.io
 import io
 import json
 from datetime import date, timedelta
+from typing import Optional
 
 import streamlit as st
 from pptx import Presentation
@@ -14,6 +15,15 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_CONNECTOR_TYPE
+
+# Browser localStorage — auto-save the working version per browser
+try:
+    from streamlit_local_storage import LocalStorage
+    _LS_AVAILABLE = True
+except Exception:
+    _LS_AVAILABLE = False
+
+AUTOSAVE_KEY = "flighting_builder_state_v1"
 
 # ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -41,15 +51,107 @@ DEFAULT_CHANNELS = [
 
 # ─── Session state ───────────────────────────────────────────────────────────
 
+DEFAULT_CREATIVE_GROUPS = {
+    "navy":   "",
+    "blue":   "",
+    "teal":   "",
+    "olive":  "",
+    "brown":  "",
+    "salmon": "",
+    "pink":   "",
+    "tan":    "",
+}
+
 def _init():
     if "flights" not in st.session_state:
         st.session_state.flights = []
     if "channels" not in st.session_state:
         st.session_state.channels = list(DEFAULT_CHANNELS)
+    if "creative_groups" not in st.session_state:
+        st.session_state.creative_groups = dict(DEFAULT_CREATIVE_GROUPS)
+    if "slide_title" not in st.session_state:
+        st.session_state.slide_title = "CIO Digital Flighting"
+    if "subtitle" not in st.session_state:
+        st.session_state.subtitle = "Hero Content"
+    if "n_weeks" not in st.session_state:
+        st.session_state.n_weeks = 14
+    if "range_start" not in st.session_state:
+        _today = date.today()
+        st.session_state.range_start = _today - timedelta(days=_today.weekday())
     if "pptx_bytes" not in st.session_state:
         st.session_state.pptx_bytes = None
     if "edit_idx" not in st.session_state:
         st.session_state.edit_idx = None
+
+
+def serialize_state() -> dict:
+    """Snapshot of everything the user has edited, ready for JSON."""
+    return {
+        "version": 1,
+        "slide": {
+            "title":       st.session_state.get("slide_title", "CIO Digital Flighting"),
+            "subtitle":    st.session_state.get("subtitle", "Hero Content"),
+            "range_start": st.session_state.get("range_start", date.today()).isoformat(),
+            "n_weeks":     st.session_state.get("n_weeks", 14),
+        },
+        "channels":        list(st.session_state.get("channels", DEFAULT_CHANNELS)),
+        "creative_groups": dict(st.session_state.get("creative_groups", DEFAULT_CREATIVE_GROUPS)),
+        "flights": [
+            {**f,
+             "start_date": f["start_date"].isoformat(),
+             "end_date":   f["end_date"].isoformat()}
+            for f in st.session_state.get("flights", [])
+        ],
+    }
+
+
+def apply_state(raw) -> int:
+    """Restore a serialized state into session_state. Returns # of flights loaded."""
+    # Back-compat: very old exports were a bare list of flights
+    if isinstance(raw, list):
+        flights_raw = raw
+        slide = channels = groups = None
+    else:
+        flights_raw = raw.get("flights", [])
+        slide       = raw.get("slide")
+        channels    = raw.get("channels")
+        groups      = raw.get("creative_groups")
+
+    # Parse flight dates
+    flights = []
+    for f in flights_raw:
+        f = dict(f)
+        if isinstance(f.get("start_date"), str):
+            f["start_date"] = date.fromisoformat(f["start_date"])
+        if isinstance(f.get("end_date"), str):
+            f["end_date"] = date.fromisoformat(f["end_date"])
+        flights.append(f)
+    st.session_state.flights = flights
+
+    if channels:
+        st.session_state.channels = list(channels)
+    if groups:
+        st.session_state.creative_groups.update(groups)
+        # Sync widget keys so the text_inputs reflect the new labels
+        for ck, lbl in groups.items():
+            st.session_state[f"cg_{ck}"] = lbl
+    if slide:
+        if "title" in slide:
+            st.session_state.slide_title = slide["title"]
+        if "subtitle" in slide:
+            st.session_state.subtitle = slide["subtitle"]
+        if "range_start" in slide:
+            try:
+                st.session_state.range_start = date.fromisoformat(slide["range_start"])
+            except Exception:
+                pass
+        if "n_weeks" in slide:
+            try:
+                st.session_state.n_weeks = int(slide["n_weeks"])
+            except Exception:
+                pass
+    st.session_state.pptx_bytes = None
+    return len(flights)
 
 
 def next_flight_id() -> str:
@@ -134,7 +236,8 @@ def build_channel_cells(flights, week_dates, channels):
 # ─── HTML preview ────────────────────────────────────────────────────────────
 
 def build_preview_html(flights, week_dates, current_week_idx,
-                       slide_title, subtitle, channels):
+                       slide_title, subtitle, channels, creative_groups=None):
+    creative_groups = creative_groups or {}
     """Render an HTML preview of the slide that mirrors the PPTX layout."""
     n_wk = len(week_dates)
     flight_rows, n_gr = assign_rows(flights, week_dates)
@@ -250,20 +353,25 @@ def build_preview_html(flights, week_dates, current_week_idx,
 
     h.append('</div>')  # /grid
 
-    # ── Legend ───────────────────────────────────────────────────────────
+    # ── Legend (color → creative group) ─────────────────────────────────
     h.append('<div class="leg">')
-    h.append('<div class="leg-ttl">FLIGHT LEGEND</div>')
-    seen = set()
-    for f in flights:
-        if f["id"] in seen:
-            continue
-        seen.add(f["id"])
-        color = COLOR_OPTIONS[f["color"]][1]
-        esc_label = (f["label"] or "").replace("<", "&lt;").replace(">", "&gt;")
+    h.append('<div class="leg-ttl">CREATIVE GROUPS</div>')
+    for color_key in colors_in_use(flights):
+        color_hex = COLOR_OPTIONS[color_key][1]
+        color_name = COLOR_OPTIONS[color_key][0]
+        label = (creative_groups.get(color_key) or "").strip()
+        if label:
+            esc = label.replace("<", "&lt;").replace(">", "&gt;")
+            text_html = f'<strong>{esc}</strong>'
+        else:
+            text_html = (
+                f'<span style="color:#9a948b; font-style:italic">'
+                f'({color_name} — unlabeled)</span>'
+            )
         h.append(
             f'<div class="leg-item">'
-            f'<span class="leg-sw" style="background:{color}"></span>'
-            f'<span><span class="leg-id">{f["id"]}</span> {esc_label}</span>'
+            f'<span class="leg-sw" style="background:{color_hex}"></span>'
+            f'<span>{text_html}</span>'
             f'</div>'
         )
     h.append('</div>')
@@ -308,7 +416,7 @@ def _box(slide, x, y, w, h, fill=None, lc=None, lw=0.5):
 
 def _lbl(slide, text, x, y, w, h, fs=9, bold=False, col="000000",
          align="left", valign="middle", fill=None, lc=None, lw=0.5,
-         wrap=True, ml=0.04):
+         wrap=True, ml=0.04, italic=False):
     s = _box(slide, x, y, w, h, fill=fill, lc=lc, lw=lw)
     tf = s.text_frame
     tf.word_wrap = wrap
@@ -329,6 +437,7 @@ def _lbl(slide, text, x, y, w, h, fs=9, bold=False, col="000000",
         r.text = line
         r.font.size = Pt(fs)
         r.font.bold = bold
+        r.font.italic = italic
         r.font.color.rgb = _c(col)
     return s
 
@@ -349,8 +458,16 @@ def _vline(slide, x, y, height, col="CCCAC4", lw=0.3):
     cn.line.width = Pt(lw)
 
 
+def colors_in_use(flights):
+    """Return color_keys (in palette order) that appear in at least one flight."""
+    used = {f["color"] for f in flights if f.get("color")}
+    return [k for k in COLOR_OPTIONS.keys() if k in used]
+
+
 def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
-                  slide_title: str, subtitle: str, channels: list) -> bytes:
+                  slide_title: str, subtitle: str, channels: list,
+                  creative_groups: Optional[dict] = None) -> bytes:
+    creative_groups = creative_groups or {}
     n_wk = len(week_dates)
     col_w = (SL_W - ML - MR - LABEL_W) / n_wk
     col_x0 = ML + LABEL_W
@@ -483,27 +600,38 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
                      fs=5, bold=True, col=_C["white"],
                      align="center", valign="middle", ml=0)
 
-    # ── Legend ─────────────────────────────────────────────────────────────
+    # ── Legend (color → creative group) ────────────────────────────────────
     _box(slide, ML, LG_Y, SL_W - ML - MR, LG_H, fill=_C["legBg"], lc=_C["border"], lw=0.5)
-    _lbl(slide, "FLIGHT LEGEND", ML + 0.08, LG_Y + 0.05, 1.4, 0.18,
+    _lbl(slide, "CREATIVE GROUPS", ML + 0.08, LG_Y + 0.05, 1.8, 0.18,
          fs=6.5, bold=True, col=_C["subTxt"], valign="middle", ml=0)
 
-    items_per_row = 8
-    entry_w = (SL_W - ML - MR - 0.16) / items_per_row
-    LG_BOX_W, LG_BOX_H = 0.15, 0.13
+    used_colors = colors_in_use(flights)
+    if used_colors:
+        items_per_row = min(4, max(1, len(used_colors)))
+        # Wider entries since each entry now holds the creative group label
+        entry_w = (SL_W - ML - MR - 0.16) / items_per_row
+        LG_BOX_W, LG_BOX_H = 0.22, 0.16
 
-    for idx, fl in enumerate(flights):
-        col_i = idx % items_per_row
-        row_i = idx // items_per_row
-        lx = ML + 0.08 + col_i * entry_w
-        ly = LG_Y + 0.27 + row_i * 0.22
-        clr = _C.get(fl["color"], _C["navy"])
-        _box(slide, lx, ly, LG_BOX_W, LG_BOX_H, fill=clr, lc="FFFFFF", lw=0.3)
-        _lbl(slide, fl["id"], lx, ly, LG_BOX_W, LG_BOX_H,
-             fs=5, bold=True, col=_C["white"], align="center", valign="middle", ml=0)
-        _lbl(slide, fl["label"], lx + LG_BOX_W + 0.04, ly,
-             entry_w - LG_BOX_W - 0.06, LG_BOX_H,
-             fs=6, col=_C["titleTx"], align="left", valign="middle", ml=0)
+        for idx, color_key in enumerate(used_colors):
+            col_i = idx % items_per_row
+            row_i = idx // items_per_row
+            lx = ML + 0.08 + col_i * entry_w
+            ly = LG_Y + 0.27 + row_i * 0.22
+            clr = _C.get(color_key, _C["navy"])
+            label = (creative_groups.get(color_key) or "").strip()
+            if not label:
+                # Fall back to the color's display name so the legend is never confusing
+                label = f"({COLOR_OPTIONS[color_key][0]})"
+                color_for_text = _C["subTxt"]
+                italic = True
+            else:
+                color_for_text = _C["titleTx"]
+                italic = False
+            _box(slide, lx, ly, LG_BOX_W, LG_BOX_H, fill=clr, lc="FFFFFF", lw=0.3)
+            _lbl(slide, label, lx + LG_BOX_W + 0.05, ly,
+                 entry_w - LG_BOX_W - 0.08, LG_BOX_H,
+                 fs=8, bold=not italic, italic=italic, col=color_for_text,
+                 align="left", valign="middle", ml=0)
 
     # ── Footer ─────────────────────────────────────────────────────────────
     _box(slide, 0, FT_Y, SL_W, SL_H - FT_Y, fill="F0EDE8", lc=None)
@@ -528,6 +656,28 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ─── Auto-save to browser localStorage ───────────────────────────────────────
+# Tries to restore the user's last session on first load; saves on each rerun.
+_ls = None
+if _LS_AVAILABLE:
+    _ls = LocalStorage()
+
+    if "_ls_restored" not in st.session_state:
+        _saved = _ls.getItem(AUTOSAVE_KEY, key="ls_restore")
+        if _saved:
+            try:
+                _raw = json.loads(_saved) if isinstance(_saved, str) else _saved
+                apply_state(_raw)
+            except Exception:
+                pass
+            st.session_state._ls_restored = True
+        else:
+            # Component is async — give it a couple of reruns to respond,
+            # otherwise assume no saved data and proceed
+            st.session_state["_ls_attempts"] = st.session_state.get("_ls_attempts", 0) + 1
+            if st.session_state["_ls_attempts"] >= 3:
+                st.session_state._ls_restored = True
 
 st.markdown("""
 <style>
@@ -554,12 +704,8 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## ⚙️ Slide Settings")
 
-    slide_title = st.text_input("Slide title", value="CIO Digital Flighting")
-    subtitle    = st.text_input("Subtitle", value="Hero Content")
-
-    # Default the slide's week-range start to the Monday of the current week
-    _today = date.today()
-    _default_range_start = _today - timedelta(days=_today.weekday())
+    slide_title = st.text_input("Slide title", key="slide_title")
+    subtitle    = st.text_input("Subtitle",    key="subtitle")
 
     def _sync_form_dates():
         """When the slide's week range start changes, update the Add-Flight defaults too."""
@@ -569,11 +715,10 @@ with st.sidebar:
 
     start_date = st.date_input(
         "Week range start",
-        value=_default_range_start,
         key="range_start",
         on_change=_sync_form_dates,
     )
-    n_weeks    = st.slider("Number of weeks", min_value=6, max_value=26, value=14)
+    n_weeks    = st.slider("Number of weeks", min_value=6, max_value=26, key="n_weeks")
 
     week_dates = build_week_dates(start_date, n_weeks)
     today = date.today()
@@ -590,6 +735,35 @@ with st.sidebar:
     )
 
     st.divider()
+    with st.expander("🎨 Creative Groups (legend labels)", expanded=False):
+        st.caption(
+            "Label each color so the legend at the bottom of the slide "
+            "shows what category each color represents (e.g. \"Hero Content\")."
+        )
+        def _save_cg(color_key):
+            st.session_state.creative_groups[color_key] = st.session_state[f"cg_{color_key}"]
+            st.session_state.pptx_bytes = None  # legend changed → invalidate cache
+
+        for color_key, (color_name, color_hex) in COLOR_OPTIONS.items():
+            sw, lbl, txt = st.columns([0.5, 1.4, 3])
+            sw.markdown(
+                f"<div style='background:{color_hex};width:28px;height:20px;"
+                f"border-radius:3px;margin-top:6px;border:1px solid #ddd'></div>",
+                unsafe_allow_html=True,
+            )
+            lbl.markdown(f"<div style='margin-top:6px;font-size:13px'>{color_name}</div>",
+                         unsafe_allow_html=True)
+            current_val = st.session_state.creative_groups.get(color_key, "")
+            txt.text_input(
+                f"creative_group_{color_key}",
+                value=current_val,
+                key=f"cg_{color_key}",
+                on_change=_save_cg,
+                args=(color_key,),
+                placeholder="e.g. Hero Content",
+                label_visibility="collapsed",
+            )
+
     with st.expander("📡 Manage Channels", expanded=False):
         st.caption("Channels appear as rows on the slide and as options when adding a flight.")
 
@@ -673,48 +847,34 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.markdown("## 💾 Import / Export")
-
-    export_data = json.dumps(
-        {
-            "channels": st.session_state.channels,
-            "flights": [
-                {**f, "start_date": str(f["start_date"]), "end_date": str(f["end_date"])}
-                for f in st.session_state.flights
-            ],
-        },
-        indent=2,
+    st.markdown("## 💾 Save / Load Working Version")
+    st.caption(
+        "Save your work to a file you can reload later or share with teammates. "
+        "Auto-save to this browser also runs in the background."
     )
+
+    export_data = json.dumps(serialize_state(), indent=2)
+    safe_title = "".join(
+        c if c.isalnum() or c in "-_" else "_"
+        for c in (st.session_state.get("slide_title") or "flighting").strip()
+    ) or "flighting"
     st.download_button(
-        "Export flights as JSON",
+        "💾  Save my work (download JSON)",
         data=export_data,
-        file_name="flights.json",
+        file_name=f"{safe_title.lower()}.json",
         mime="application/json",
         use_container_width=True,
     )
 
-    uploaded = st.file_uploader("Import flights from JSON", type="json", label_visibility="collapsed")
+    uploaded = st.file_uploader("📂  Load saved work", type="json")
     if uploaded:
         try:
             raw = json.loads(uploaded.read())
-            # Back-compat: old exports were a bare list of flights
-            if isinstance(raw, list):
-                imported_flights = raw
-                imported_channels = None
-            else:
-                imported_flights = raw.get("flights", [])
-                imported_channels = raw.get("channels")
-            for f in imported_flights:
-                f["start_date"] = date.fromisoformat(f["start_date"])
-                f["end_date"]   = date.fromisoformat(f["end_date"])
-            st.session_state.flights = imported_flights
-            if imported_channels:
-                st.session_state.channels = imported_channels
-            st.session_state.pptx_bytes = None
-            st.success(f"Imported {len(imported_flights)} flights.")
+            n = apply_state(raw)
+            st.success(f"Loaded {n} flight(s).")
             st.rerun()
         except Exception as e:
-            st.error(f"Import failed: {e}")
+            st.error(f"Load failed: {e}")
 
 
 # ─── Main area ───────────────────────────────────────────────────────────────
@@ -851,6 +1011,7 @@ with tab_preview:
         slide_title=slide_title,
         subtitle=subtitle,
         channels=st.session_state.channels,
+        creative_groups=st.session_state.creative_groups,
     )
     # Approximate height based on rows
     n_gr_preview = max(assign_rows(st.session_state.flights, week_dates)[1], 1)
@@ -890,6 +1051,7 @@ with tab_generate:
                         slide_title=slide_title,
                         subtitle=subtitle,
                         channels=st.session_state.channels,
+                        creative_groups=st.session_state.creative_groups,
                     )
                     st.success("Slide ready!")
                 except Exception as e:
@@ -905,3 +1067,11 @@ with tab_generate:
                 use_container_width=True,
                 type="primary",
             )
+
+
+# ─── Auto-save current state back to browser localStorage ────────────────────
+if _ls is not None and st.session_state.get("_ls_restored"):
+    try:
+        _ls.setItem(AUTOSAVE_KEY, json.dumps(serialize_state()), key="ls_save")
+    except Exception:
+        pass
