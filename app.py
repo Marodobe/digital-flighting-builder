@@ -664,7 +664,7 @@ if _LS_AVAILABLE:
     _ls = LocalStorage()
 
     if "_ls_restored" not in st.session_state:
-        _saved = _ls.getItem(AUTOSAVE_KEY, key="ls_restore")
+        _saved = _ls.getItem(AUTOSAVE_KEY)
         if _saved:
             try:
                 _raw = json.loads(_saved) if isinstance(_saved, str) else _saved
