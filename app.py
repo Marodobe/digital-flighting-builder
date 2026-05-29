@@ -28,14 +28,18 @@ AUTOSAVE_KEY = "flighting_builder_state_v1"
 # ─── Constants ──────────────────────────────────────────────────────────────
 
 COLOR_OPTIONS = {
-    "navy":   ("Navy Blue",    "#1C2E5C"),
-    "blue":   ("Steel Blue",   "#3B60A8"),
-    "teal":   ("Teal",         "#1E6A6E"),
-    "olive":  ("Olive/Tan",    "#7A6945"),
-    "brown":  ("Brown",        "#96724B"),
-    "salmon": ("Coral/Salmon", "#D96B5F"),
-    "pink":   ("Hot Pink",     "#D41A82"),
-    "tan":    ("Gold/Tan",     "#C0A060"),
+    "navy":     ("Navy Blue",     "#1C2E5C"),
+    "blue":     ("Steel Blue",    "#3B60A8"),
+    "teal":     ("Teal",          "#1E6A6E"),
+    "olive":    ("Olive/Tan",     "#7A6945"),
+    "brown":    ("Brown",         "#96724B"),
+    "salmon":   ("Coral/Salmon",  "#D96B5F"),
+    "pink":     ("Hot Pink",      "#D41A82"),
+    "tan":      ("Gold/Tan",      "#C0A060"),
+    "forest":   ("Forest Green",  "#2C6B3A"),
+    "purple":   ("Royal Purple",  "#5C3D9E"),
+    "orange":   ("Burnt Orange",  "#D17F2A"),
+    "burgundy": ("Burgundy",      "#7E2D40"),
 }
 
 DEFAULT_CHANNELS = [
@@ -52,14 +56,18 @@ DEFAULT_CHANNELS = [
 # ─── Session state ───────────────────────────────────────────────────────────
 
 DEFAULT_CREATIVE_GROUPS = {
-    "navy":   "",
-    "blue":   "",
-    "teal":   "",
-    "olive":  "",
-    "brown":  "",
-    "salmon": "",
-    "pink":   "",
-    "tan":    "",
+    "navy":     "",
+    "blue":     "",
+    "teal":     "",
+    "olive":    "",
+    "brown":    "",
+    "salmon":   "",
+    "pink":     "",
+    "tan":      "",
+    "forest":   "",
+    "purple":   "",
+    "orange":   "",
+    "burgundy": "",
 }
 
 def _init():
@@ -393,6 +401,7 @@ _C = dict(
     navy="1C2E5C", blue="3B60A8", teal="1E6A6E",
     olive="7A6945", brown="96724B", salmon="D96B5F",
     pink="D41A82", tan="C0A060",
+    forest="2C6B3A", purple="5C3D9E", orange="D17F2A", burgundy="7E2D40",
 )
 
 SL_W, SL_H = 13.3, 7.5
