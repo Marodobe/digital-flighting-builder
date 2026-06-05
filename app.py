@@ -1046,6 +1046,29 @@ with tab_flights:
 # ── Tab 2: Preview ───────────────────────────────────────────────────────────
 with tab_preview:
     st.caption("Live preview — updates as you add or edit flights.")
+
+    # Warn if any flights fall outside the visible week range
+    if st.session_state.flights and week_dates:
+        range_start = week_dates[0]
+        range_end   = week_dates[-1] + timedelta(days=6)  # end of last week
+        out_of_range = []
+        for f in st.session_state.flights:
+            if f["end_date"] < range_start or f["start_date"] > range_end:
+                out_of_range.append(f)
+        if out_of_range:
+            # Suggest a range that would cover all flights
+            min_start = min(f["start_date"] for f in st.session_state.flights)
+            max_end   = max(f["end_date"]   for f in st.session_state.flights)
+            # Align min_start to Monday for clean week alignment
+            suggested_start = min_start - timedelta(days=min_start.weekday())
+            suggested_weeks = max(1, ((max_end - suggested_start).days // 7) + 1)
+            st.warning(
+                f"⚠️ **{len(out_of_range)} of {len(st.session_state.flights)} flight(s) "
+                f"fall outside the visible week range** and won't appear below. "
+                f"To see them, set **Week range start** to **{suggested_start.strftime('%b %-d, %Y')}** "
+                f"and **Number of weeks** to **{suggested_weeks}** in the sidebar."
+            )
+
     preview_html = build_preview_html(
         flights=st.session_state.flights,
         week_dates=week_dates,
