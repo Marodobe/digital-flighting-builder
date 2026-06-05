@@ -198,55 +198,53 @@ def flight_cols(f, week_dates):
     return start_col, end_col
 
 def assign_rows(flights, week_dates):
-    """Pack flights into rows grouped by color — same-color bars stay adjacent.
+    """Pack flights into rows in list order — compact (greedy minimum rows).
 
-    For each color (in the palette order defined by COLOR_OPTIONS), pack its
-    flights into rows using a greedy no-overlap algorithm. Stack color groups
-    vertically so all navy flights appear together, then blue, then teal, etc.
+    The order of the `flights` list is the placement priority: earlier in the
+    list = placed in an earlier row when there's a choice. Greedy no-overlap
+    packing ensures the row count stays at the minimum possible. The "Group
+    by color" UI button re-sorts the list itself to restore color clustering.
+
     Returns (list of (flight, row_idx), total_rows).
     """
-    color_order = list(COLOR_OPTIONS.keys())
-    color_idx = {c: i for i, c in enumerate(color_order)}
-
-    # Bucket flights by color, preserving insertion order within each bucket
-    by_color = {}
+    rows = []
     for fl in flights:
-        c = fl.get("color") or color_order[0]
-        by_color.setdefault(c, []).append(fl)
-
-    # Walk color buckets in palette order so the slide looks consistent
-    sorted_colors = sorted(by_color.keys(), key=lambda c: color_idx.get(c, len(color_order)))
+        sc, ec = flight_cols(fl, week_dates)
+        if sc is None:
+            continue
+        placed = False
+        for row in rows:
+            ok = True
+            for ex in row:
+                ex_sc, ex_ec = flight_cols(ex, week_dates)
+                if ex_sc < ec and sc < ex_ec:
+                    ok = False
+                    break
+            if ok:
+                row.append(fl)
+                placed = True
+                break
+        if not placed:
+            rows.append([fl])
 
     result = []
-    total_rows = 0
-    for color in sorted_colors:
-        ordered = sorted(by_color[color], key=lambda f: f["start_date"])
-        rows = []  # local row buckets for THIS color only
-        for fl in ordered:
-            sc, ec = flight_cols(fl, week_dates)
-            if sc is None:
-                continue
-            placed = False
-            for row in rows:
-                ok = True
-                for ex in row:
-                    ex_sc, ex_ec = flight_cols(ex, week_dates)
-                    if ex_sc < ec and sc < ex_ec:
-                        ok = False
-                        break
-                if ok:
-                    row.append(fl)
-                    placed = True
-                    break
-            if not placed:
-                rows.append([fl])
-        # Stack this color's rows under whatever's already been placed
-        for ri, row in enumerate(rows):
-            for fl in row:
-                result.append((fl, total_rows + ri))
-        total_rows += len(rows)
+    for ri, row in enumerate(rows):
+        for fl in row:
+            result.append((fl, ri))
+    return result, len(rows)
 
-    return result, total_rows
+
+def sort_flights_by_color(flights):
+    """Return a new flight list sorted by (color palette order, start_date)."""
+    color_order = list(COLOR_OPTIONS.keys())
+    color_idx = {c: i for i, c in enumerate(color_order)}
+    return sorted(
+        flights,
+        key=lambda f: (
+            color_idx.get(f.get("color"), len(color_order)),
+            f["start_date"],
+        ),
+    )
 
 def build_channel_cells(flights, week_dates, channels):
     """For each channel, return a list of badge-ID lists (one per week column)."""
@@ -1046,6 +1044,45 @@ with tab_flights:
 # ── Tab 2: Preview ───────────────────────────────────────────────────────────
 with tab_preview:
     st.caption("Live preview — updates as you add or edit flights.")
+
+    # ── Reorder controls ─────────────────────────────────────────────────
+    if st.session_state.flights:
+        with st.expander("🪄  Reorder bars", expanded=False):
+            top1, top2 = st.columns([1.4, 4])
+            if top1.button("🎨  Group by color", help="Re-sort all flights into color clusters",
+                           use_container_width=True):
+                st.session_state.flights = sort_flights_by_color(st.session_state.flights)
+                st.session_state.pptx_bytes = None
+                st.rerun()
+            top2.caption(
+                "Click ⬆ / ⬇ to move a flight one position in the visual stack. "
+                "Bars are then packed as compactly as possible while honoring your order."
+            )
+
+            n = len(st.session_state.flights)
+            for i, f in enumerate(st.session_state.flights):
+                ucol, dcol, info = st.columns([0.5, 0.5, 6])
+                if ucol.button("⬆", key=f"ord_up_{i}",
+                               disabled=(i == 0), help="Move up"):
+                    fl = st.session_state.flights
+                    fl[i - 1], fl[i] = fl[i], fl[i - 1]
+                    st.session_state.pptx_bytes = None
+                    st.rerun()
+                if dcol.button("⬇", key=f"ord_down_{i}",
+                               disabled=(i == n - 1), help="Move down"):
+                    fl = st.session_state.flights
+                    fl[i + 1], fl[i] = fl[i], fl[i + 1]
+                    st.session_state.pptx_bytes = None
+                    st.rerun()
+                hex_color = COLOR_OPTIONS[f["color"]][1].lstrip("#")
+                info.markdown(
+                    f"<span class='badge' style='background:#{hex_color}'>{f['id']}</span>"
+                    f" &nbsp; <strong>{f['label']}</strong>"
+                    f" &nbsp; <span style='color:#888;font-size:12px'>"
+                    f"{COLOR_OPTIONS[f['color']][0]} · "
+                    f"{f['start_date'].strftime('%b %-d')} → {f['end_date'].strftime('%b %-d')}</span>",
+                    unsafe_allow_html=True,
+                )
 
     # Warn if any flights fall outside the visible week range
     if st.session_state.flights and week_dates:
