@@ -198,32 +198,55 @@ def flight_cols(f, week_dates):
     return start_col, end_col
 
 def assign_rows(flights, week_dates):
-    """Pack flights into rows with no overlap. Returns list of (flight, row_idx)."""
-    rows = []
-    ordered = sorted(flights, key=lambda f: f["start_date"])
-    for fl in ordered:
-        sc, ec = flight_cols(fl, week_dates)
-        if sc is None:
-            continue
-        placed = False
-        for row in rows:
-            ok = True
-            for ex in row:
-                ex_sc, ex_ec = flight_cols(ex, week_dates)
-                if ex_sc < ec and sc < ex_ec:
-                    ok = False
-                    break
-            if ok:
-                row.append(fl)
-                placed = True
-                break
-        if not placed:
-            rows.append([fl])
+    """Pack flights into rows grouped by color — same-color bars stay adjacent.
+
+    For each color (in the palette order defined by COLOR_OPTIONS), pack its
+    flights into rows using a greedy no-overlap algorithm. Stack color groups
+    vertically so all navy flights appear together, then blue, then teal, etc.
+    Returns (list of (flight, row_idx), total_rows).
+    """
+    color_order = list(COLOR_OPTIONS.keys())
+    color_idx = {c: i for i, c in enumerate(color_order)}
+
+    # Bucket flights by color, preserving insertion order within each bucket
+    by_color = {}
+    for fl in flights:
+        c = fl.get("color") or color_order[0]
+        by_color.setdefault(c, []).append(fl)
+
+    # Walk color buckets in palette order so the slide looks consistent
+    sorted_colors = sorted(by_color.keys(), key=lambda c: color_idx.get(c, len(color_order)))
+
     result = []
-    for ri, row in enumerate(rows):
-        for fl in row:
-            result.append((fl, ri))
-    return result, len(rows)
+    total_rows = 0
+    for color in sorted_colors:
+        ordered = sorted(by_color[color], key=lambda f: f["start_date"])
+        rows = []  # local row buckets for THIS color only
+        for fl in ordered:
+            sc, ec = flight_cols(fl, week_dates)
+            if sc is None:
+                continue
+            placed = False
+            for row in rows:
+                ok = True
+                for ex in row:
+                    ex_sc, ex_ec = flight_cols(ex, week_dates)
+                    if ex_sc < ec and sc < ex_ec:
+                        ok = False
+                        break
+                if ok:
+                    row.append(fl)
+                    placed = True
+                    break
+            if not placed:
+                rows.append([fl])
+        # Stack this color's rows under whatever's already been placed
+        for ri, row in enumerate(rows):
+            for fl in row:
+                result.append((fl, total_rows + ri))
+        total_rows += len(rows)
+
+    return result, total_rows
 
 def build_channel_cells(flights, week_dates, channels):
     """For each channel, return a list of badge-ID lists (one per week column)."""
