@@ -264,7 +264,7 @@ def build_channel_cells(flights, week_dates, channels):
 
 # ─── HTML preview ────────────────────────────────────────────────────────────
 
-def build_preview_html(flights, week_dates, current_week_idx,
+def build_preview_html(flights, week_dates,
                        slide_title, subtitle, channels, creative_groups=None):
     creative_groups = creative_groups or {}
     """Render an HTML preview of the slide that mirrors the PPTX layout."""
@@ -279,49 +279,85 @@ def build_preview_html(flights, week_dates, current_week_idx,
     .sp {{ font-family: -apple-system, "Segoe UI", Calibri, sans-serif;
            background: white; border: 1px solid #d0cdc6; padding: 14px 16px;
            color: #1a1a2e; max-width: 100%; box-sizing: border-box; }}
+    .sp .head {{ display: flex; align-items: flex-start;
+                 justify-content: space-between; gap: 16px; margin-bottom: 10px; }}
+    .sp .head-left {{ min-width: 0; }}
     .sp .ttl {{ font-size: 22px; font-weight: 700; line-height: 1.1; }}
-    .sp .sub {{ font-size: 12px; color: #6b6560; margin: 2px 0 10px; }}
+    .sp .sub {{ font-size: 12px; color: #6b6560; margin: 2px 0 0; }}
     .sp .grid {{ display: grid; grid-template-columns: 120px repeat({n_wk}, 1fr);
                  gap: 0; font-size: 9px; }}
     .sp .c {{ border: 0.5px solid #d8d4cd; padding: 2px 4px; box-sizing: border-box;
-              min-height: 22px; display: flex; align-items: center;
+              min-height: 30px; display: flex; align-items: center;
               overflow: hidden; }}
     .sp .lab {{ background: #eeeae4; font-weight: 600; font-size: 9.5px;
                 line-height: 1.15; }}
     .sp .hdr {{ background: #eeeae4; justify-content: center; font-weight: 600;
-                font-size: 8.5px; }}
-    .sp .hdr.cur {{ background: #1a1a2e; color: white; }}
+                font-size: 8.5px; min-height: 22px; }}
     .sp .bar {{ color: white; font-weight: 500; font-size: 9px;
                 gap: 6px; padding: 2px 6px; white-space: nowrap;
-                text-overflow: ellipsis; min-height: 22px; border: none;
+                text-overflow: ellipsis; min-height: 30px; border: none;
                 border-right: 1px solid rgba(255,255,255,0.6); }}
     .sp .bar .fid {{ font-weight: 700; padding-right: 6px; flex: 0 0 auto;
                      border-right: 1px solid rgba(255,255,255,0.45); }}
     .sp .bar .lbl {{ overflow: hidden; text-overflow: ellipsis; }}
     .sp .ch {{ padding: 3px; align-content: flex-start; flex-wrap: wrap;
-               gap: 2px; min-height: 26px; }}
-    .sp .ch.cur {{ background: #ece9f4; }}
+               gap: 2px; min-height: 34px; }}
     .sp .chb {{ display: inline-block; padding: 1px 3px; font-size: 7.5px;
                 font-weight: 700; color: white; border-radius: 2px;
                 line-height: 1.3; }}
     .sp .ch-name {{ font-weight: 600; font-size: 9.5px; line-height: 1.15;
                     white-space: pre-line; }}
-    .sp .leg {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-                gap: 4px 14px; margin-top: 12px; padding: 8px 10px;
-                background: #f7f5f2; border: 1px solid #d8d4cd; font-size: 10px; }}
-    .sp .leg-ttl {{ grid-column: 1 / -1; font-size: 9px; font-weight: 700;
-                    letter-spacing: 0.5px; color: #6b6560; }}
-    .sp .leg-item {{ display: flex; align-items: center; gap: 6px; }}
-    .sp .leg-sw {{ width: 14px; height: 12px; flex: 0 0 14px; }}
-    .sp .leg-id {{ font-weight: 700; }}
+    .sp .co {{ flex: 0 0 auto; min-width: 190px; max-width: 260px;
+               background: #f7f5f2; border: 1px solid #d8d4cd;
+               padding: 6px 9px; font-size: 10px; }}
+    .sp .co-ttl {{ font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+                   color: #6b6560; margin-bottom: 4px; }}
+    .sp .co-item {{ display: flex; align-items: center; gap: 6px;
+                    margin: 2px 0; }}
+    .sp .co-sw {{ width: 14px; height: 12px; flex: 0 0 14px; }}
     .sp .empty {{ color: #9a948b; font-style: italic; padding: 12px;
                   text-align: center; }}
     </style>
     """
 
+    # ── Creative-groups callout (top-right) ──────────────────────────────
+    co_html = ""
+    if flights:
+        items = []
+        for color_key in colors_in_use(flights):
+            color_hex = COLOR_OPTIONS[color_key][1]
+            color_name = COLOR_OPTIONS[color_key][0]
+            label = (creative_groups.get(color_key) or "").strip()
+            if label:
+                esc = label.replace("<", "&lt;").replace(">", "&gt;")
+                text_html = f'<strong>{esc}</strong>'
+            else:
+                text_html = (
+                    f'<span style="color:#9a948b; font-style:italic">'
+                    f'({color_name} — unlabeled)</span>'
+                )
+            items.append(
+                f'<div class="co-item">'
+                f'<span class="co-sw" style="background:{color_hex}"></span>'
+                f'<span>{text_html}</span>'
+                f'</div>'
+            )
+        if items:
+            co_html = (
+                '<div class="co">'
+                '<div class="co-ttl">CREATIVE GROUPS</div>'
+                + "".join(items) +
+                '</div>'
+            )
+
     h = [css, '<div class="sp">']
+    h.append('<div class="head">')
+    h.append('<div class="head-left">')
     h.append(f'<div class="ttl">{slide_title}</div>')
     h.append(f'<div class="sub">{subtitle}</div>')
+    h.append('</div>')  # /head-left
+    h.append(co_html)
+    h.append('</div>')  # /head
 
     if not flights:
         h.append('<div class="empty">No flights yet. Add one in the sidebar to see the preview.</div>')
@@ -333,8 +369,7 @@ def build_preview_html(flights, week_dates, current_week_idx,
     # ── Header row ───────────────────────────────────────────────────────
     h.append('<div class="c lab">Content Flights</div>')
     for i, d in enumerate(week_dates):
-        cls = "c hdr cur" if i == current_week_idx else "c hdr"
-        h.append(f'<div class="{cls}">{week_label(d)}</div>')
+        h.append(f'<div class="c hdr">{week_label(d)}</div>')
 
     # ── Gantt rows ───────────────────────────────────────────────────────
     by_row = {}
@@ -377,33 +412,9 @@ def build_preview_html(flights, week_dates, current_week_idx,
                     f = flights_by_id.get(fid)
                     color = COLOR_OPTIONS[f["color"]][1] if f else "#888"
                     badges_html += f'<span class="chb" style="background:{color}">{fid}</span>'
-            cls = "c ch cur" if wk == current_week_idx else "c ch"
-            h.append(f'<div class="{cls}">{badges_html}</div>')
+            h.append(f'<div class="c ch">{badges_html}</div>')
 
     h.append('</div>')  # /grid
-
-    # ── Legend (color → creative group) ─────────────────────────────────
-    h.append('<div class="leg">')
-    h.append('<div class="leg-ttl">CREATIVE GROUPS</div>')
-    for color_key in colors_in_use(flights):
-        color_hex = COLOR_OPTIONS[color_key][1]
-        color_name = COLOR_OPTIONS[color_key][0]
-        label = (creative_groups.get(color_key) or "").strip()
-        if label:
-            esc = label.replace("<", "&lt;").replace(">", "&gt;")
-            text_html = f'<strong>{esc}</strong>'
-        else:
-            text_html = (
-                f'<span style="color:#9a948b; font-style:italic">'
-                f'({color_name} — unlabeled)</span>'
-            )
-        h.append(
-            f'<div class="leg-item">'
-            f'<span class="leg-sw" style="background:{color_hex}"></span>'
-            f'<span>{text_html}</span>'
-            f'</div>'
-        )
-    h.append('</div>')
 
     h.append('</div>')  # /sp
     return "".join(h)
@@ -417,8 +428,8 @@ def _c(h):
 _C = dict(
     white="FFFFFF", black="000000", border="CCCAC4",
     rowAlt="F4F2EF", titleTx="1A1A2E", subTxt="6B6560",
-    adobe="FF0000", colHL="1A1A2E", weekBg="EEEAE4",
-    weekTx="2D2926", legBg="F7F5F2", chanHL="E8E4F2",
+    adobe="FF0000", weekBg="EEEAE4",
+    weekTx="2D2926", legBg="F7F5F2",
     navy="1C2E5C", blue="3B60A8", teal="1E6A6E",
     olive="7A6945", brown="96724B", salmon="D96B5F",
     pink="D41A82", tan="C0A060",
@@ -494,7 +505,7 @@ def colors_in_use(flights):
     return [k for k in COLOR_OPTIONS.keys() if k in used]
 
 
-def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
+def generate_pptx(flights: list, week_dates: list,
                   slide_title: str, subtitle: str, channels: list,
                   creative_groups: Optional[dict] = None) -> bytes:
     creative_groups = creative_groups or {}
@@ -506,21 +517,38 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
     n_gr = max(n_gr, 1)
     channel_cells = build_channel_cells(flights, week_dates, channels)
 
-    # Vertical layout — adaptive so adding many channels still fits
+    # ── Creative-groups callout geometry (top-right) ─────────────────────
+    used_colors  = colors_in_use(flights)
+    CO_W         = 3.15
+    CO_X         = SL_W - MR - CO_W
+    CO_TITLE_H   = 0.19
+    CO_PITCH     = 0.16
+    CO_SW        = 0.14
+    CO_PAD       = 0.07
+    CO_Y         = 0.10
+    if used_colors:
+        CO_H = CO_PAD + CO_TITLE_H + len(used_colors) * CO_PITCH + CO_PAD
+    else:
+        CO_H = 0.0
+
+    # Vertical layout — grid clears the callout, then rows fill all the space
     T_Y, T_H       = 0.10, 0.40
-    HDR_Y, HDR_H   = 0.54, 0.26
-    G_Y             = HDR_Y + HDR_H
-    G_RH            = max(0.15, min(0.22, 2.8 / n_gr))
-    G_BOT           = G_Y + n_gr * G_RH
-    CH_Y            = G_BOT + 0.07
-    FT_Y            = SL_H - 0.26
-    LG_H            = 0.70
-    # Reserve space for legend + footer; fit channel rows in what's left
-    avail_for_chan  = FT_Y - LG_H - 0.06 - CH_Y
-    N_CH            = max(len(channels), 1)
-    C_RH            = max(0.20, min(0.34, avail_for_chan / N_CH))
-    CH_BOT          = CH_Y + N_CH * C_RH
-    LG_Y            = CH_BOT + 0.06
+    HDR_H          = 0.26
+    HDR_Y          = max(0.54, CO_Y + CO_H + 0.10) if used_colors else 0.54
+    G_Y            = HDR_Y + HDR_H
+    FT_Y           = SL_H - 0.26
+
+    # Fill everything between the grid and the footer with gantt + channel
+    # rows. Gantt rows run a bit shorter than channel rows (ratio 0.62).
+    ROW_GAP        = 0.10
+    N_CH           = max(len(channels), 1)
+    avail_rows     = FT_Y - 0.05 - G_Y - ROW_GAP
+    row_units      = n_gr * 0.62 + N_CH * 1.0
+    unit           = avail_rows / row_units if row_units else avail_rows
+    G_RH           = 0.62 * unit
+    C_RH           = unit
+    G_BOT          = G_Y + n_gr * G_RH
+    CH_Y           = G_BOT + ROW_GAP
 
     prs = Presentation()
     prs.slide_width = Inches(SL_W)
@@ -534,9 +562,26 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
          fs=26, bold=True, col=_C["titleTx"], valign="bottom", ml=0)
     _lbl(slide, subtitle, ML, T_Y + T_H * 0.55, 9, T_H * 0.42,
          fs=13, col=_C["subTxt"], valign="top", ml=0)
-    cur_label = f"Week of {week_label(week_dates[current_week_idx])}  \u25cf  Current" if 0 <= current_week_idx < n_wk else ""
-    _lbl(slide, cur_label, 8.0, T_Y, 5.1, T_H,
-         fs=9, col=_C["subTxt"], align="right", valign="middle", ml=0)
+    # \u2500\u2500 Creative-groups callout (top-right) \u2500\u2500
+    if used_colors:
+        _box(slide, CO_X, CO_Y, CO_W, CO_H, fill=_C["legBg"], lc=_C["border"], lw=0.5)
+        _lbl(slide, "CREATIVE GROUPS", CO_X + 0.09, CO_Y + CO_PAD, CO_W - 0.18, CO_TITLE_H,
+             fs=6.5, bold=True, col=_C["subTxt"], valign="middle", ml=0)
+        for idx, color_key in enumerate(used_colors):
+            ly  = CO_Y + CO_PAD + CO_TITLE_H + idx * CO_PITCH
+            clr = _C.get(color_key, _C["navy"])
+            label = (creative_groups.get(color_key) or "").strip()
+            if not label:
+                label = f"({COLOR_OPTIONS[color_key][0]})"
+                text_col, italic = _C["subTxt"], True
+            else:
+                text_col, italic = _C["titleTx"], False
+            _box(slide, CO_X + 0.09, ly + (CO_PITCH - CO_SW) / 2,
+                 CO_SW * 1.35, CO_SW, fill=clr, lc="FFFFFF", lw=0.3)
+            _lbl(slide, label, CO_X + 0.09 + CO_SW * 1.35 + 0.07, ly,
+                 CO_W - 0.18 - CO_SW * 1.35 - 0.07, CO_PITCH,
+                 fs=8, bold=not italic, italic=italic, col=text_col,
+                 align="left", valign="middle", ml=0)
 
     # ── Date header ────────────────────────────────────────────────────────
     _box(slide, ML, HDR_Y, SL_W - ML - MR, HDR_H, fill=_C["weekBg"], lc=_C["border"])
@@ -544,12 +589,10 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
          fs=7.5, bold=True, col=_C["titleTx"], valign="middle", ml=0.06)
     for i, wd in enumerate(week_dates):
         x = col_x0 + i * col_w
-        hl = (i == current_week_idx)
         _box(slide, x, HDR_Y, col_w, HDR_H,
-             fill=_C["colHL"] if hl else _C["weekBg"], lc=_C["border"], lw=0.4)
+             fill=_C["weekBg"], lc=_C["border"], lw=0.4)
         _lbl(slide, week_label(wd), x, HDR_Y, col_w, HDR_H,
-             fs=7, bold=hl,
-             col=_C["white"] if hl else _C["weekTx"],
+             fs=7, col=_C["weekTx"],
              align="center", valign="middle", ml=0)
 
     # ── Gantt rows ─────────────────────────────────────────────────────────
@@ -560,11 +603,6 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
              lc=_C["border"], lw=0.3)
     for i in range(n_wk + 1):
         _vline(slide, col_x0 + i * col_w, G_Y, n_gr * G_RH)
-    if 0 <= current_week_idx < n_wk:
-        for r in range(n_gr):
-            ry = G_Y + r * G_RH
-            _box(slide, col_x0 + current_week_idx * col_w, ry, col_w, G_RH,
-                 fill="DDD8EE", lc=None)
 
     G_PAD = 0.02
     BAR_H = G_RH - 2 * G_PAD
@@ -601,9 +639,6 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
         alt = ri % 2 == 1
         _box(slide, ML, ry, SL_W - ML - MR, C_RH,
              fill=_C["rowAlt"] if alt else _C["white"], lc=_C["border"], lw=0.3)
-        if 0 <= current_week_idx < n_wk:
-            _box(slide, col_x0 + current_week_idx * col_w, ry, col_w, C_RH,
-                 fill=_C["chanHL"], lc=None)
         for i in range(n_wk + 1):
             _vline(slide, col_x0 + i * col_w, ry, C_RH)
         _lbl(slide, ch, ML, ry, LABEL_W, C_RH,
@@ -630,38 +665,6 @@ def generate_pptx(flights: list, week_dates: list, current_week_idx: int,
                      fs=5, bold=True, col=_C["white"],
                      align="center", valign="middle", ml=0)
 
-    # ── Legend (color → creative group) ────────────────────────────────────
-    _box(slide, ML, LG_Y, SL_W - ML - MR, LG_H, fill=_C["legBg"], lc=_C["border"], lw=0.5)
-    _lbl(slide, "CREATIVE GROUPS", ML + 0.08, LG_Y + 0.05, 1.8, 0.18,
-         fs=6.5, bold=True, col=_C["subTxt"], valign="middle", ml=0)
-
-    used_colors = colors_in_use(flights)
-    if used_colors:
-        items_per_row = min(4, max(1, len(used_colors)))
-        # Wider entries since each entry now holds the creative group label
-        entry_w = (SL_W - ML - MR - 0.16) / items_per_row
-        LG_BOX_W, LG_BOX_H = 0.22, 0.16
-
-        for idx, color_key in enumerate(used_colors):
-            col_i = idx % items_per_row
-            row_i = idx // items_per_row
-            lx = ML + 0.08 + col_i * entry_w
-            ly = LG_Y + 0.27 + row_i * 0.22
-            clr = _C.get(color_key, _C["navy"])
-            label = (creative_groups.get(color_key) or "").strip()
-            if not label:
-                # Fall back to the color's display name so the legend is never confusing
-                label = f"({COLOR_OPTIONS[color_key][0]})"
-                color_for_text = _C["subTxt"]
-                italic = True
-            else:
-                color_for_text = _C["titleTx"]
-                italic = False
-            _box(slide, lx, ly, LG_BOX_W, LG_BOX_H, fill=clr, lc="FFFFFF", lw=0.3)
-            _lbl(slide, label, lx + LG_BOX_W + 0.05, ly,
-                 entry_w - LG_BOX_W - 0.08, LG_BOX_H,
-                 fs=8, bold=not italic, italic=italic, col=color_for_text,
-                 align="left", valign="middle", ml=0)
 
     # ── Footer ─────────────────────────────────────────────────────────────
     _box(slide, 0, FT_Y, SL_W, SL_H - FT_Y, fill="F0EDE8", lc=None)
@@ -751,26 +754,11 @@ with st.sidebar:
     n_weeks    = st.slider("Number of weeks", min_value=1, max_value=26, key="n_weeks")
 
     week_dates = build_week_dates(start_date, n_weeks)
-    today = date.today()
-    cur_idx = next(
-        (i for i, ws in enumerate(week_dates)
-         if ws <= today <= ws + timedelta(days=6)),
-        0
-    )
-    if n_weeks > 1:
-        cur_idx = st.slider(
-            "Current week column",
-            min_value=0, max_value=n_weeks - 1, value=cur_idx,
-            format="Week %d",
-            help="Which column is highlighted as 'current week'",
-        )
-    else:
-        cur_idx = 0  # Only one week — nothing to choose
 
     st.divider()
     with st.expander("🎨 Creative Groups (legend labels)", expanded=False):
         st.caption(
-            "Label each color so the legend at the bottom of the slide "
+            "Label each color so the callout in the top-right of the slide "
             "shows what category each color represents (e.g. \"Hero Content\")."
         )
         def _save_cg(color_key):
@@ -1109,7 +1097,6 @@ with tab_preview:
     preview_html = build_preview_html(
         flights=st.session_state.flights,
         week_dates=week_dates,
-        current_week_idx=cur_idx,
         slide_title=slide_title,
         subtitle=subtitle,
         channels=st.session_state.channels,
@@ -1130,16 +1117,12 @@ with tab_generate:
         st.markdown(f"""
         **Slide:** {slide_title} — {subtitle}
         **Date range:** {wk_labels[0]} → {wk_labels[-1]}  ({n_weeks} weeks)
-        **Current week:** {wk_labels[cur_idx]}
         **Flights:** {len(st.session_state.flights)}
         """)
 
         # Week range preview
         with st.expander("Week columns preview"):
-            st.write(" · ".join(
-                f"**{w}**" if i == cur_idx else w
-                for i, w in enumerate(wk_labels)
-            ))
+            st.write(" · ".join(wk_labels))
 
         st.divider()
 
@@ -1149,7 +1132,6 @@ with tab_generate:
                     st.session_state.pptx_bytes = generate_pptx(
                         flights=st.session_state.flights,
                         week_dates=week_dates,
-                        current_week_idx=cur_idx,
                         slide_title=slide_title,
                         subtitle=subtitle,
                         channels=st.session_state.channels,
