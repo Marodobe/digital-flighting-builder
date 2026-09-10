@@ -307,13 +307,14 @@ def build_preview_html(flights, week_dates,
                 line-height: 1.3; }}
     .sp .ch-name {{ font-weight: 600; font-size: 9.5px; line-height: 1.15;
                     white-space: pre-line; }}
-    .sp .co {{ flex: 0 0 auto; min-width: 190px; max-width: 260px;
+    .sp .co {{ flex: 0 0 auto; max-width: 60%;
                background: #f7f5f2; border: 1px solid #d8d4cd;
-               padding: 6px 9px; font-size: 10px; }}
+               padding: 6px 10px; font-size: 10px; }}
     .sp .co-ttl {{ font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
-                   color: #6b6560; margin-bottom: 4px; }}
-    .sp .co-item {{ display: flex; align-items: center; gap: 6px;
-                    margin: 2px 0; }}
+                   color: #6b6560; margin-bottom: 5px; }}
+    .sp .co-items {{ display: grid; grid-auto-flow: column;
+                     grid-template-rows: repeat(2, auto); gap: 3px 18px; }}
+    .sp .co-item {{ display: flex; align-items: center; gap: 6px; }}
     .sp .co-sw {{ width: 14px; height: 12px; flex: 0 0 14px; }}
     .sp .empty {{ color: #9a948b; font-style: italic; padding: 12px;
                   text-align: center; }}
@@ -346,7 +347,9 @@ def build_preview_html(flights, week_dates,
             co_html = (
                 '<div class="co">'
                 '<div class="co-ttl">CREATIVE GROUPS</div>'
+                '<div class="co-items">'
                 + "".join(items) +
+                '</div>'
                 '</div>'
             )
 
@@ -428,7 +431,7 @@ def _c(h):
 _C = dict(
     white="FFFFFF", black="000000", border="CCCAC4",
     rowAlt="F4F2EF", titleTx="1A1A2E", subTxt="6B6560",
-    adobe="FF0000", weekBg="EEEAE4",
+    weekBg="EEEAE4",
     weekTx="2D2926", legBg="F7F5F2",
     navy="1C2E5C", blue="3B60A8", teal="1E6A6E",
     olive="7A6945", brown="96724B", salmon="D96B5F",
@@ -518,25 +521,37 @@ def generate_pptx(flights: list, week_dates: list,
     channel_cells = build_channel_cells(flights, week_dates, channels)
 
     # ── Creative-groups callout geometry (top-right) ─────────────────────
+    # Entries flow column-major, at most CO_ROWS (2) stacked vertically, so
+    # the callout stays short and wide rather than a tall vertical list.
     used_colors  = colors_in_use(flights)
-    CO_W         = 3.15
-    CO_X         = SL_W - MR - CO_W
+    n_used       = len(used_colors)
+    CO_ROWS      = 2
+    CO_COLS      = (n_used + CO_ROWS - 1) // CO_ROWS if n_used else 0
     CO_TITLE_H   = 0.19
-    CO_PITCH     = 0.16
+    CO_PITCH     = 0.17
     CO_SW        = 0.14
-    CO_PAD       = 0.07
+    CO_PAD       = 0.09
+    CO_GAP_X     = 0.16
     CO_Y         = 0.10
-    if used_colors:
-        CO_H = CO_PAD + CO_TITLE_H + len(used_colors) * CO_PITCH + CO_PAD
+    ENTRY_W      = 1.55
+    CO_MAX_W     = 6.4
+    if CO_COLS:
+        CO_W = min(CO_MAX_W,
+                   CO_PAD * 2 + CO_COLS * ENTRY_W + (CO_COLS - 1) * CO_GAP_X)
+        ENTRY_W = (CO_W - CO_PAD * 2 - (CO_COLS - 1) * CO_GAP_X) / CO_COLS
+        rows_used = min(CO_ROWS, n_used)
+        CO_H = CO_PAD + CO_TITLE_H + rows_used * CO_PITCH + CO_PAD
     else:
-        CO_H = 0.0
+        CO_W = CO_H = 0.0
+    CO_X = SL_W - MR - CO_W
 
     # Vertical layout — grid clears the callout, then rows fill all the space
     T_Y, T_H       = 0.10, 0.40
+    TITLE_W        = min(9.0, CO_X - ML - 0.2) if used_colors else 9.0
     HDR_H          = 0.26
     HDR_Y          = max(0.54, CO_Y + CO_H + 0.10) if used_colors else 0.54
     G_Y            = HDR_Y + HDR_H
-    FT_Y           = SL_H - 0.26
+    FT_Y           = SL_H - 0.08  # no footer bar; rows fill to the bottom edge
 
     # Fill everything between the grid and the footer with gantt + channel
     # rows. Gantt rows run a bit shorter than channel rows (ratio 0.62).
@@ -558,17 +573,22 @@ def generate_pptx(flights: list, week_dates: list,
     slide.background.fill.fore_color.rgb = _c(_C["white"])
 
     # ── Title ──────────────────────────────────────────────────────────────
-    _lbl(slide, slide_title, ML, T_Y, 9, T_H * 0.58,
+    _lbl(slide, slide_title, ML, T_Y, TITLE_W, T_H * 0.58,
          fs=26, bold=True, col=_C["titleTx"], valign="bottom", ml=0)
-    _lbl(slide, subtitle, ML, T_Y + T_H * 0.55, 9, T_H * 0.42,
+    _lbl(slide, subtitle, ML, T_Y + T_H * 0.55, TITLE_W, T_H * 0.42,
          fs=13, col=_C["subTxt"], valign="top", ml=0)
     # \u2500\u2500 Creative-groups callout (top-right) \u2500\u2500
     if used_colors:
         _box(slide, CO_X, CO_Y, CO_W, CO_H, fill=_C["legBg"], lc=_C["border"], lw=0.5)
-        _lbl(slide, "CREATIVE GROUPS", CO_X + 0.09, CO_Y + CO_PAD, CO_W - 0.18, CO_TITLE_H,
+        _lbl(slide, "CREATIVE GROUPS", CO_X + CO_PAD, CO_Y + CO_PAD * 0.7,
+             CO_W - CO_PAD * 2, CO_TITLE_H,
              fs=6.5, bold=True, col=_C["subTxt"], valign="middle", ml=0)
+        sw_w = CO_SW * 1.35
         for idx, color_key in enumerate(used_colors):
-            ly  = CO_Y + CO_PAD + CO_TITLE_H + idx * CO_PITCH
+            col_i = idx // CO_ROWS
+            row_i = idx % CO_ROWS
+            ex = CO_X + CO_PAD + col_i * (ENTRY_W + CO_GAP_X)
+            ey = CO_Y + CO_PAD + CO_TITLE_H + row_i * CO_PITCH
             clr = _C.get(color_key, _C["navy"])
             label = (creative_groups.get(color_key) or "").strip()
             if not label:
@@ -576,12 +596,12 @@ def generate_pptx(flights: list, week_dates: list,
                 text_col, italic = _C["subTxt"], True
             else:
                 text_col, italic = _C["titleTx"], False
-            _box(slide, CO_X + 0.09, ly + (CO_PITCH - CO_SW) / 2,
-                 CO_SW * 1.35, CO_SW, fill=clr, lc="FFFFFF", lw=0.3)
-            _lbl(slide, label, CO_X + 0.09 + CO_SW * 1.35 + 0.07, ly,
-                 CO_W - 0.18 - CO_SW * 1.35 - 0.07, CO_PITCH,
+            _box(slide, ex, ey + (CO_PITCH - CO_SW) / 2, sw_w, CO_SW,
+                 fill=clr, lc="FFFFFF", lw=0.3)
+            _lbl(slide, label, ex + sw_w + 0.06, ey,
+                 ENTRY_W - sw_w - 0.06, CO_PITCH,
                  fs=8, bold=not italic, italic=italic, col=text_col,
-                 align="left", valign="middle", ml=0)
+                 align="left", valign="middle", ml=0, wrap=False)
 
     # ── Date header ────────────────────────────────────────────────────────
     _box(slide, ML, HDR_Y, SL_W - ML - MR, HDR_H, fill=_C["weekBg"], lc=_C["border"])
@@ -664,16 +684,6 @@ def generate_pptx(flights: list, week_dates: list,
                 _lbl(slide, fid, bx, bby, BADGE_BW, BADGE_BH,
                      fs=5, bold=True, col=_C["white"],
                      align="center", valign="middle", ml=0)
-
-
-    # ── Footer ─────────────────────────────────────────────────────────────
-    _box(slide, 0, FT_Y, SL_W, SL_H - FT_Y, fill="F0EDE8", lc=None)
-    _hline(slide, 0, FT_Y, SL_W, _C["border"], 0.5)
-    _lbl(slide, "Adobe", ML, FT_Y, 1.2, SL_H - FT_Y,
-         fs=16, bold=True, col=_C["adobe"], valign="middle", ml=0)
-    _lbl(slide, "\u00a9 2024 Adobe. All Rights Reserved. Adobe Confidential.",
-         SL_W - 5.5, FT_Y, 5.5 - MR, SL_H - FT_Y,
-         fs=7, col=_C["subTxt"], align="right", valign="middle", ml=0)
 
     buf = io.BytesIO()
     prs.save(buf)
